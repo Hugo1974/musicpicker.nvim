@@ -80,31 +80,93 @@ local function update_window_title(track_path)
 	end)
 end
 
+local function get_progress_stats()
+	local cmd = string.format(
+		'echo \'{"command": ["get_property", "percent-pos"]}\' \'{"command": ["get_property", "time-pos"]}\' \'{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
+		config.options.socket_path
+	)
+	local handle = io.popen(cmd)
+	local result = handle:read("*a")
+	handle:close()
+
+	-- Extraer datos con regex
+	local percent = result:match('"data"%s*:%s*(%d+%.?%d*)')
+	local curr_sec = result:match('"data"%s*:%s*(%d+%.?%d*)', result:find("time%-pos") or 1)
+	local total_sec = result:match('"data"%s*:%s*(%d+%.?%d*)', result:find("duration") or 1)
+
+	if not percent then
+		return ""
+	end
+
+	-- Formatear tiempo (MM:SS)
+	local function format_time(seconds)
+		if not seconds then
+			return "00:00"
+		end
+		local s = tonumber(seconds)
+		return string.format("%02d:%02d", math.floor(s / 60), math.floor(s % 60))
+	end
+
+	-- Dibujar barra
+	local width = 20
+	local done = math.floor(tonumber(percent) / 100 * width)
+	local bar = ""
+	for i = 1, width do
+		bar = bar .. (i == done and "●" or (i < done and "─" or " "))
+	end
+
+	return string.format(
+		"\n%s\n%s / %s (%d%%)",
+		"[" .. bar .. "]",
+		format_time(curr_sec),
+		format_time(total_sec),
+		math.floor(tonumber(percent))
+	)
+end
+
 local function start_mpv_listener()
 	if listener_job then
 		vim.fn.jobstop(listener_job)
 	end
+
 	local socket = config.options.socket_path
-	-- Socat puro para evitar alias de grep
-	local cmd = string.format("socat - UNIX-CONNECT:%s", socket)
+	-- Usamos stdbuf -oL para forzar que socat escupa línea por línea sin retraso
+	local cmd = string.format("stdbuf -oL socat - UNIX-CONNECT:%s", socket)
 
 	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				-- Detectamos el evento de cambio de archivo en el JSON de MPV
+				-- Detectamos cuando MPV cambia de pista o actualiza metadata
 				if line:find("metadata") or line:find("start%-file") then
 					vim.defer_fn(function()
 						local title = get_mpv_title()
 						if title then
-							vim.notify(title:gsub("%.%w+$", ""), "info", {
+							local clean_title = title:gsub("%.%w+$", "")
+							local icon = config.options.icons.music or "🎶"
+
+							-- 1. Actualizar título de la terminal/ventana
+							vim.o.titlestring = icon .. " " .. clean_title
+							io.write(string.format("\27]2;%s %s\7", icon, clean_title))
+							io.flush()
+
+							-- 2. Mostrar notificación con la barra de progreso
+							local stats = get_progress_stats() -- La función que hicimos antes
+							vim.notify(clean_title .. stats, "info", {
 								title = "Now Playing",
-								icon = config.options.icons.music,
+								icon = icon,
 								replace = true,
 							})
+
+							-- Forzar redibujado de la UI
+							vim.cmd([[redraw]])
 						end
 					end, 500)
 				end
 			end
+		end,
+		on_stderr = function() end,
+		on_exit = function()
+			listener_job = nil
 		end,
 	})
 end
@@ -275,6 +337,21 @@ function M.play_file_from_config()
 			end,
 		})
 		:find()
+end
+
+function M.show_status()
+	local title = get_mpv_title()
+	if not title or title == "" then
+		vim.notify("MPV is not playing", "warn", { title = "Music Player" })
+		return
+	end
+
+	local stats = get_progress_stats()
+	vim.notify(title:gsub("%.%w+$", "") .. stats, "info", {
+		title = "Now Playing",
+		icon = config.options.icons.music,
+		replace = true, -- Esto evita que se amontonen las notificaciones
+	})
 end
 
 return M
