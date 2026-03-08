@@ -18,6 +18,8 @@ playing directly in your editor's window title.
 
 - **Auto-Cleanup**: Automatically kills the music process when you exit Neovim.
 
+- **Status**: Visual progress bar status
+
 ## 📋 Dependencies
 
 Before installing, ensure you have the following CLI tools available:
