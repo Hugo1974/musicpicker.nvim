@@ -61,7 +61,13 @@ function M.play_at_index(idx)
 	)
 	os.execute(cmd)
 
-	vim.notify("Playing: " .. vim.fn.fnamemodify(track, ":t"), "info")
+	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
+	local icon = (config.options.icons and config.options.icons.music) or "🎶"
+
+	vim.notify(string.format("[%d/%d] %s %s", n, #lines, icon, track_name), "info", {
+		title = "Music Player",
+		timeout = 3000, -- Duración del recuadro (3 segundos)
+	})
 end
 
 -- Navegación
