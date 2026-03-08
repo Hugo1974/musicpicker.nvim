@@ -8,10 +8,10 @@ local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
 local conf = require("telescope.config").values
 
--- Inicialización
+local listener_job = nil
+
 function M.setup(opts)
 	config.setup(opts)
-
 	vim.api.nvim_create_autocmd("VimLeave", {
 		callback = function()
 			os.execute("killall -9 mpv 2>/dev/null")
@@ -19,50 +19,46 @@ function M.setup(opts)
 	})
 end
 
--- Función para escuchar eventos de MPV en segundo plano
-local function start_mpv_listener()
-	-- Este comando de shell escucha el socket y filtra cuando cambia el título
-	-- Usamos vim.fn.jobstart para que no bloquee Neovim
-	local socket = config.options.socket_path
-	local cmd = string.format('socat - UNIX-CONNECT:%s | stdbuf -oL grep \'"property":"media-title"\'', socket)
+-- Actualiza el título de la ventana de Neovim y terminal
+local function update_window_title(track_path)
+	local name = vim.fn.fnamemodify(track_path, ":t"):gsub("%.%w+$", "")
+	local icon = config.options.icons.music or "🎶"
+	vim.o.title = true
+	vim.o.titlestring = icon .. " " .. name
+	io.write(string.format("\27]2;%s %s\7", icon, name))
+	io.flush()
+	vim.schedule(function()
+		vim.cmd([[redraw]])
+	end)
+end
 
-	vim.fn.jobstart(cmd, {
+-- Escucha cambios automáticos de MPV
+local function start_mpv_listener()
+	if listener_job then
+		vim.fn.jobstop(listener_job)
+	end
+	local socket = config.options.socket_path
+	local cmd = string.format("socat - UNIX-CONNECT:%s", socket)
+
+	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				if line ~= "" then
-					-- Cuando MPV avisa que cambió el título, pedimos el nuevo nombre
+				if line:find("metadata") or line:find("track-selection") then
 					vim.defer_fn(function()
-						local new_title = utils.get_mpv_title()
-						if new_title then
-							local icon = (config.options.icons and config.options.icons.music) or "🎶"
-							vim.notify(icon .. " Now Playing: " .. new_title:gsub("%.%w+$", ""), "info", {
-								title = "Music Player",
-								replace = true, -- Reemplaza la notificación anterior para no llenar la pantalla
+						local title = utils.get_mpv_title()
+						if title then
+							vim.notify(title:gsub("%.%w+$", ""), "info", {
+								title = "Now Playing",
+								icon = config.options.icons.music,
 							})
 						end
-					end, 500) -- Pequeño delay para que MPV termine de cargar el archivo
+					end, 500)
 				end
 			end
 		end,
 	})
 end
 
--- Actualiza el título de la ventana de Neovim
-local function update_window_title(track_path)
-	local name = vim.fn.fnamemodify(track_path, ":t"):gsub("%.%w+$", "")
-	vim.o.title = true
-	vim.o.titlestring = (config.options.icons and config.options.icons.music or "🎶") .. " " .. name
-
-	-- Forzar actualización en terminales
-	io.write(string.format("\27]2;🎶 %s\7", name))
-	io.flush()
-
-	vim.schedule(function()
-		vim.cmd([[redraw]])
-	end)
-end
-
--- Reproducción
 function M.play_at_index(idx)
 	local lines = utils.get_playlist_lines()
 	if #lines == 0 then
@@ -88,36 +84,31 @@ function M.play_at_index(idx)
 		n - 1
 	)
 	os.execute(cmd)
-	-- Arrancamos el escuchador para captar cambios automáticos
-	vim.defer_fn(function()
-		start_mpv_listener()
-	end, 500)
+
+	-- Notificación inmediata al usuario
+	vim.notify(vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", ""), "info", {
+		title = "Music Player",
+		icon = config.options.icons.music,
+	})
+
+	vim.defer_fn(start_mpv_listener, 800)
 end
 
--- Navegación
-function M.navigate(direction)
-	local content = utils.read_file(config.options.current_idx_file)
-	local current = tonumber(content) or 1
-	M.play_at_index(current + direction)
-end
-
--- Menú de Controles
 function M.show_controls()
-	local current_title = utils.get_mpv_title() or "MPV"
-	local icons = config.options.icons or {}
-
+	local current_title = utils.get_mpv_title() or "Stopped"
+	local icons = config.options.icons
 	local items = {
-		{ d = (icons.play or "▶") .. " Pause/Play", a = "pause" },
-		{ d = (icons.next or "⏭") .. " Next", a = "next" },
-		{ d = (icons.prev or "⏮") .. " Prev", a = "prev" },
-		{ d = (icons.stop or "⏹") .. " Stop", a = "stop" },
+		{ d = icons.play .. " Pause/Play", a = "pause" },
+		{ d = icons.next .. " Next", a = "next" },
+		{ d = icons.prev .. " Prev", a = "prev" },
+		{ d = icons.stop .. " Stop", a = "stop" },
 	}
 
 	pickers
 		.new(
 			require("telescope.themes").get_dropdown({
 				layout_config = { width = 0.4, height = 10 },
-				prompt_title = (icons.music or "🎶") .. " " .. current_title:gsub("%.%w+$", ""),
+				prompt_title = (icons.music .. " " .. current_title:gsub("%.%w+$", "")),
 			}),
 			{
 				finder = finders.new_table({
@@ -133,7 +124,6 @@ function M.show_controls()
 						if not sel then
 							return
 						end
-
 						if sel.value == "next" or sel.value == "prev" then
 							local cmd = sel.value == "next" and "playlist-next" or "playlist-prev"
 							os.execute(
@@ -144,9 +134,7 @@ function M.show_controls()
 								)
 							)
 							actions.close(prompt_bufnr)
-							vim.defer_fn(function()
-								M.show_controls()
-							end, 150)
+							vim.defer_fn(M.show_controls, 150)
 						elseif sel.value == "pause" then
 							os.execute(
 								string.format(
@@ -168,7 +156,6 @@ function M.show_controls()
 		:find()
 end
 
--- Selección de base y búsqueda de archivos
 function M.select_base_directory()
 	local home = os.getenv("HOME")
 	require("telescope.builtin").find_files({
@@ -193,42 +180,40 @@ end
 function M.play_file_from_config()
 	local path = utils.read_file(config.options.music_root_file)
 	if path == "" then
-		vim.notify("Set music library first with select_base_directory", "warn")
-		return
+		return vim.notify("Set library first!", "warn")
 	end
 
 	pickers
 		.new({}, {
-			prompt_title = "Songs (Current Directory Only)",
-			finder = finders.new_oneshot_job({
-				"fd",
-				"-t",
-				"f",
-				"-e",
-				"mp3",
-				"-e",
-				"flac",
-				"-e",
-				"m4a",
-				"--max-depth",
-				"1", -- <--- ESTO limita la búsqueda a la carpeta raíz
-				"--absolute-path",
-				".",
-				path,
-			}, {}),
+			prompt_title = "Songs",
+			finder = finders.new_oneshot_job(
+				{
+					"fd",
+					"-t",
+					"f",
+					"-e",
+					"mp3",
+					"-e",
+					"flac",
+					"-e",
+					"m4a",
+					"--max-depth",
+					"1",
+					"--absolute-path",
+					".",
+					path,
+				},
+				{}
+			),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
 					local selection = action_state.get_selected_entry()
 					local picker = action_state.get_current_picker(prompt_bufnr)
-
-					-- Guardamos la lista de lo que vemos en el picker actual
-					local playlist_path = config.options.m3u_file
-					local f = io.open(playlist_path, "w")
+					local f = io.open(config.options.m3u_file, "w")
 					if not f then
 						return
 					end
-
 					local sel_idx, count = 1, 0
 					for entry in picker.manager:iter() do
 						count = count + 1
@@ -238,7 +223,6 @@ function M.play_file_from_config()
 						end
 					end
 					f:close()
-
 					actions.close(prompt_bufnr)
 					M.play_at_index(sel_idx)
 				end)
