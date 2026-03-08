@@ -19,47 +19,49 @@ function M.setup(opts)
 	})
 end
 
--- Actualiza el título de la ventana de Neovim y terminal
 local function update_window_title(track_path)
 	local name = vim.fn.fnamemodify(track_path, ":t"):gsub("%.%w+$", "")
 	local icon = config.options.icons.music or "🎶"
 	vim.o.title = true
 	vim.o.titlestring = icon .. " " .. name
-	io.write(string.format("\27]2;%s %s\7", icon, name))
-	io.flush()
+	-- Usamos un schedule para no bloquear el dibujado
 	vim.schedule(function()
+		io.write(string.format("\27]2;%s %s\7", icon, name))
+		io.flush()
 		vim.cmd([[redraw]])
 	end)
 end
 
--- Escucha cambios automáticos de MPV
 local function start_mpv_listener()
 	if listener_job then
 		vim.fn.jobstop(listener_job)
 	end
 
 	local socket = config.options.socket_path
-	-- Usamos /usr/bin/grep (o grep plano) para evitar alias del usuario
-	-- Quitamos stdbuf y usamos una tubería más simple
-	local cmd = string.format("socat - UNIX-CONNECT:%s", socket)
+	-- Importante: usamos 'stdbuf -oL' para que el flujo sea por línea y no se bloquee
+	local cmd = string.format("stdbuf -oL socat - UNIX-CONNECT:%s", socket)
 
 	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				-- Buscamos el patrón JSON que envía MPV cuando cambia de canción
-				if line:find('"property":"media%-title"') or line:find('"property":"path"') then
+				-- Si detectamos cualquier cambio de propiedad en el JSON de MPV
+				if line:find("event") then
 					vim.defer_fn(function()
 						local title = utils.get_mpv_title()
 						if title then
-							local icon = (config.options.icons and config.options.icons.music) or "🎶"
-							vim.notify(icon .. " Now Playing: " .. title:gsub("%.%w+$", ""), "info", {
-								title = "Music Player",
+							vim.notify(title:gsub("%.%w+$", ""), "info", {
+								title = "Now Playing",
+								icon = config.options.icons.music,
 								replace = true,
 							})
 						end
-					end, 500)
+					end, 200)
 				end
 			end
+		end,
+		on_stderr = function() end,
+		on_exit = function()
+			listener_job = nil
 		end,
 	})
 end
@@ -77,12 +79,16 @@ function M.play_at_index(idx)
 		n = #lines
 	end
 	local track = lines[n]
-
-	-- NOTIFICACIÓN MANUAL (Esto funciona SIEMPRE, sin depender de MPV)
 	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
-	vim.notify("🎶 Playing: " .. track_name, "info", { title = "Music Player" })
 
+	-- 1. NOTIFICACIÓN INMEDIATA (Sincrona)
+	vim.notify("Playing: " .. track_name, "info", { title = "Music Player" })
+
+	-- 2. TÍTULO
 	update_window_title(track)
+
+	-- 3. MATAR MPV Y REPRODUCIR
+	-- Usamos os.execute de forma limpia
 	os.execute("killall -9 mpv 2>/dev/null")
 	utils.write_file(config.options.current_idx_file, n)
 
@@ -94,7 +100,10 @@ function M.play_at_index(idx)
 	)
 	os.execute(cmd)
 
-	vim.defer_fn(start_mpv_listener, 800)
+	-- 4. LISTENER (Con más margen para que el socket se cree)
+	vim.defer_fn(function()
+		start_mpv_listener()
+	end, 1200)
 end
 
 function M.show_controls()
