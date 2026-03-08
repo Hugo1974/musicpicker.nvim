@@ -81,24 +81,31 @@ local function update_window_title(track_path)
 end
 
 local function get_progress_stats()
+	local socket = config.options.socket_path
 	local cmd = string.format(
 		'echo \'{"command": ["get_property", "percent-pos"]}\' \'{"command": ["get_property", "time-pos"]}\' \'{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
-		config.options.socket_path
+		socket
 	)
+
 	local handle = io.popen(cmd)
 	local result = handle:read("*a")
 	handle:close()
 
-	-- Extraer datos con regex
+	-- Extraer los 3 valores del JSON que devuelve socat
 	local percent = result:match('"data"%s*:%s*(%d+%.?%d*)')
-	local curr_sec = result:match('"data"%s*:%s*(%d+%.?%d*)', result:find("time%-pos") or 1)
-	local total_sec = result:match('"data"%s*:%s*(%d+%.?%d*)', result:find("duration") or 1)
+	-- Buscamos el time-pos y duration recorriendo el string
+	local times = {}
+	for val in result:gmatch('"data"%s*:%s*(%d+%.?%d*)') do
+		table.insert(times, val)
+	end
+
+	local curr_sec = times[2]
+	local total_sec = times[3]
 
 	if not percent then
 		return ""
 	end
 
-	-- Formatear tiempo (MM:SS)
 	local function format_time(seconds)
 		if not seconds then
 			return "00:00"
@@ -107,20 +114,28 @@ local function get_progress_stats()
 		return string.format("%02d:%02d", math.floor(s / 60), math.floor(s % 60))
 	end
 
-	-- Dibujar barra
+	-- Configuración de la barra [---●---]
 	local width = 20
-	local done = math.floor(tonumber(percent) / 100 * width)
-	local bar = ""
+	local percent_num = tonumber(percent)
+	local done = math.floor((percent_num / 100) * width)
+
+	local bar_str = ""
 	for i = 1, width do
-		bar = bar .. (i == done and "●" or (i < done and "─" or " "))
+		if i == done then
+			bar_str = bar_str .. "●"
+		elseif i < done then
+			bar_str = bar_str .. "─"
+		else
+			bar_str = bar_str .. " "
+		end
 	end
 
 	return string.format(
-		"\n%s\n%s / %s (%d%%)",
-		"[" .. bar .. "]",
+		"\n[%s] %d%%\n%s / %s",
+		bar_str,
+		math.floor(percent_num),
 		format_time(curr_sec),
-		format_time(total_sec),
-		math.floor(tonumber(percent))
+		format_time(total_sec)
 	)
 end
 
@@ -151,9 +166,9 @@ local function start_mpv_listener()
 
 							-- 2. Mostrar notificación con la barra de progreso
 							local stats = get_progress_stats() -- La función que hicimos antes
-							vim.notify(clean_title .. stats, "info", {
-								title = "Now Playing",
-								icon = icon,
+							vim.notify(title:gsub("%.%w+$", "") .. stats, "info", {
+								title = "Music Player",
+								icon = "󰎆",
 								replace = true,
 							})
 
