@@ -169,7 +169,7 @@ function M.play_file_from_config()
 
 	pickers
 		.new({}, {
-			prompt_title = "Songs",
+			prompt_title = "Songs (Current Directory Only)",
 			finder = finders.new_oneshot_job({
 				"fd",
 				"-t",
@@ -180,6 +180,8 @@ function M.play_file_from_config()
 				"flac",
 				"-e",
 				"m4a",
+				"--max-depth",
+				"1", -- <--- ESTO limita la búsqueda a la carpeta raíz
 				"--absolute-path",
 				".",
 				path,
@@ -190,7 +192,13 @@ function M.play_file_from_config()
 					local selection = action_state.get_selected_entry()
 					local picker = action_state.get_current_picker(prompt_bufnr)
 
-					local f = io.open(config.options.m3u_file, "w")
+					-- Guardamos la lista de lo que vemos en el picker actual
+					local playlist_path = config.options.m3u_file
+					local f = io.open(playlist_path, "w")
+					if not f then
+						return
+					end
+
 					local sel_idx, count = 1, 0
 					for entry in picker.manager:iter() do
 						count = count + 1
