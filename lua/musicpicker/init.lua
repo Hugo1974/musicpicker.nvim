@@ -25,6 +25,7 @@ local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
 local conf = require("telescope.config").values
 
+local au_group = vim.api.nvim_create_augroup("MusicPickerCleanup", { clear = true })
 local listener_job = nil
 
 -- === UTILIDADES INTEGRADAS ===
@@ -98,8 +99,12 @@ end
 
 function M.setup(opts)
 	config.setup(opts)
+
+	-- El autocmd ahora vive dentro del grupo protegido
 	vim.api.nvim_create_autocmd("VimLeave", {
+		group = au_group,
 		callback = function()
+			-- -9 es un kill forzoso, útil si MPV se queda colgado
 			os.execute("killall -9 mpv 2>/dev/null")
 		end,
 	})
