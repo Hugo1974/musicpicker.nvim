@@ -82,8 +82,9 @@ end
 
 local function get_progress_stats()
 	local socket = config.options.socket_path
+	-- Enviamos los comandos separados por saltos de línea para que MPV responda claramente
 	local cmd = string.format(
-		'echo \'{"command": ["get_property", "percent-pos"]}\' \'{"command": ["get_property", "time-pos"]}\' \'{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
+		'echo \'{"command": ["get_property", "percent-pos"]}\n{"command": ["get_property", "time-pos"]}\n{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
 		socket
 	)
 
@@ -91,33 +92,28 @@ local function get_progress_stats()
 	local result = handle:read("*a")
 	handle:close()
 
-	-- Extraer los 3 valores del JSON que devuelve socat
-	local percent = result:match('"data"%s*:%s*(%d+%.?%d*)')
-	-- Buscamos el time-pos y duration recorriendo el string
-	local times = {}
+	-- Extraemos todos los números que vengan después de '"data":'
+	local values = {}
 	for val in result:gmatch('"data"%s*:%s*(%d+%.?%d*)') do
-		table.insert(times, val)
+		table.insert(values, tonumber(val))
 	end
 
-	local curr_sec = times[2]
-	local total_sec = times[3]
-
-	if not percent then
-		return ""
-	end
+	-- Asignamos valores (1: percent, 2: current, 3: total)
+	local percent = values[1] or 0
+	local curr_sec = values[2] or 0
+	local total_sec = values[3] or 0
 
 	local function format_time(seconds)
-		if not seconds then
-			return "00:00"
-		end
-		local s = tonumber(seconds)
+		local s = tonumber(seconds) or 0
 		return string.format("%02d:%02d", math.floor(s / 60), math.floor(s % 60))
 	end
 
 	-- Configuración de la barra [---●---]
 	local width = 20
-	local percent_num = tonumber(percent)
-	local done = math.floor((percent_num / 100) * width)
+	local done = math.floor((percent / 100) * width)
+	if done < 1 and percent > 0 then
+		done = 1
+	end -- Evita que el punto no salga al inicio
 
 	local bar_str = ""
 	for i = 1, width do
@@ -133,7 +129,7 @@ local function get_progress_stats()
 	return string.format(
 		"\n[%s] %d%%\n%s / %s",
 		bar_str,
-		math.floor(percent_num),
+		math.floor(percent),
 		format_time(curr_sec),
 		format_time(total_sec)
 	)
