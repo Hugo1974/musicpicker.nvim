@@ -19,6 +19,34 @@ function M.setup(opts)
 	})
 end
 
+-- Función para escuchar eventos de MPV en segundo plano
+local function start_mpv_listener()
+	-- Este comando de shell escucha el socket y filtra cuando cambia el título
+	-- Usamos vim.fn.jobstart para que no bloquee Neovim
+	local socket = config.options.socket_path
+	local cmd = string.format('socat - UNIX-CONNECT:%s | stdbuf -oL grep \'"property":"media-title"\'', socket)
+
+	vim.fn.jobstart(cmd, {
+		on_stdout = function(_, data)
+			for _, line in ipairs(data) do
+				if line ~= "" then
+					-- Cuando MPV avisa que cambió el título, pedimos el nuevo nombre
+					vim.defer_fn(function()
+						local new_title = utils.get_mpv_title()
+						if new_title then
+							local icon = (config.options.icons and config.options.icons.music) or "🎶"
+							vim.notify(icon .. " Now Playing: " .. new_title:gsub("%.%w+$", ""), "info", {
+								title = "Music Player",
+								replace = true, -- Reemplaza la notificación anterior para no llenar la pantalla
+							})
+						end
+					end, 500) -- Pequeño delay para que MPV termine de cargar el archivo
+				end
+			end
+		end,
+	})
+end
+
 -- Actualiza el título de la ventana de Neovim
 local function update_window_title(track_path)
 	local name = vim.fn.fnamemodify(track_path, ":t"):gsub("%.%w+$", "")
@@ -60,14 +88,10 @@ function M.play_at_index(idx)
 		n - 1
 	)
 	os.execute(cmd)
-
-	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
-	local icon = (config.options.icons and config.options.icons.music) or "🎶"
-
-	vim.notify(string.format("[%d/%d] %s %s", n, #lines, icon, track_name), "info", {
-		title = "Music Player",
-		timeout = 3000, -- Duración del recuadro (3 segundos)
-	})
+	-- Arrancamos el escuchador para captar cambios automáticos
+	vim.defer_fn(function()
+		start_mpv_listener()
+	end, 500)
 end
 
 -- Navegación
