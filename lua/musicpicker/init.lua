@@ -30,7 +30,6 @@ local function read_file(path)
 end
 
 local function is_mpv_running()
-	-- Comprobamos si el socket existe y si el proceso mpv está activo
 	local handle = io.popen("pgrep -x mpv")
 	local result = handle:read("*a")
 	handle:close()
@@ -52,13 +51,25 @@ local function get_playlist_lines()
 end
 
 local function get_mpv_title()
+	-- Si no está corriendo, ni lo intentamos para evitar el error de socat
+	if not is_mpv_running() then
+		return nil
+	end
+
 	local cmd = string.format(
 		'echo \'{"command": ["get_property", "media-title"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
 		config.options.socket_path
 	)
-	local handle = io.popen(cmd)
+
+	-- Usamos pcall para capturar cualquier error de ejecución de sistema
+	local success, handle = pcall(io.popen, cmd)
+	if not success or not handle then
+		return nil
+	end
+
 	local result = handle:read("*a")
 	handle:close()
+
 	if result and result ~= "" then
 		return result:match('"data"%s*:%s*"([^"]+)"')
 	end
@@ -89,6 +100,10 @@ local function update_window_title(track_path)
 end
 
 local function get_progress_stats()
+	if not is_mpv_running() then
+		return ""
+	end
+
 	local socket = config.options.socket_path
 	local cmd = string.format(
 		'echo \'{"command": ["get_property", "percent-pos"]}\n{"command": ["get_property", "time-pos"]}\n{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
@@ -123,7 +138,7 @@ local function get_progress_stats()
 		elseif i < done then
 			bar_str = bar_str .. "─"
 		else
-			bar_str = bar_str .. "·" -- Carácter de relleno visible pero discreto
+			bar_str = bar_str .. "·"
 		end
 	end
 
@@ -140,43 +155,34 @@ local function start_mpv_listener()
 	if listener_job then
 		vim.fn.jobstop(listener_job)
 	end
-
 	local socket = config.options.socket_path
-	-- Usamos stdbuf -oL para forzar que socat escupa línea por línea sin retraso
 	local cmd = string.format("stdbuf -oL socat - UNIX-CONNECT:%s", socket)
 
 	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				-- Detectamos cuando MPV cambia de pista o actualiza metadata
 				if line:find("metadata") or line:find("start%-file") then
 					vim.defer_fn(function()
 						local title = get_mpv_title()
 						if title then
 							local clean_title = title:gsub("%.%w+$", "")
 							local icon = config.options.icons.music or "🎶"
-
-							-- 1. Actualizar título de la terminal/ventana
 							vim.o.titlestring = icon .. " " .. clean_title
 							io.write(string.format("\27]2;%s %s\7", icon, clean_title))
 							io.flush()
 
-							-- 2. Mostrar notificación con la barra de progreso
-							local stats = get_progress_stats() -- La función que hicimos antes
-							vim.notify(title:gsub("%.%w+$", "") .. stats, "info", {
+							local stats = get_progress_stats()
+							vim.notify(clean_title .. stats, "info", {
 								title = "Music Player",
 								icon = "󰎆",
 								replace = true,
 							})
-
-							-- Forzar redibujado de la UI
 							vim.cmd([[redraw]])
 						end
 					end, 500)
 				end
 			end
 		end,
-		on_stderr = function() end,
 		on_exit = function()
 			listener_job = nil
 		end,
@@ -185,15 +191,16 @@ end
 
 function M.play_at_index(idx)
 	local lines = get_playlist_lines()
+
 	if #lines == 0 then
-		vim.notify("La lista de reproducción está vacía. Selecciona una carpeta de música primero.", "error", {
-			title = "Music Player",
-		})
+		vim.notify("Librería vacía. Selecciona una carpeta primero.", "warn", { title = "Music Player" })
+		M.select_base_directory()
 		return
 	end
 
-	if not idx or idx == "" then
-		vim.notify("No hay una última canción recordada. Elige una de la lista.", "info")
+	-- Si no hay índice guardado, forzamos la apertura del selector de canciones
+	if not idx or idx == "" or idx == "nil" then
+		vim.notify("No hay ninguna canción recordada. Selecciona una canción.", "warn", { title = "Music Player" })
 		M.play_file_from_config()
 		return
 	end
@@ -206,7 +213,6 @@ function M.play_at_index(idx)
 	end
 	local track = lines[n]
 
-	-- Notificación manual inmediata (funciona incluso si MPV tarda)
 	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
 	vim.notify(track_name, "info", { title = "Music Player", icon = config.options.icons.music })
 
@@ -221,12 +227,20 @@ function M.play_at_index(idx)
 		n - 1
 	)
 	os.execute(cmd)
-
 	vim.defer_fn(start_mpv_listener, 1000)
 end
 
 function M.show_controls()
-	local current_title = get_mpv_title() or "Stopped"
+	local title = get_mpv_title()
+	if not title then
+		vim.notify(
+			"El reproductor no está activo. Selecciona una canción.",
+			"warn",
+			{ title = "Music Player", icon = "" }
+		)
+		return
+	end
+
 	local icons = config.options.icons
 	local items = {
 		{ d = icons.play .. " Pause/Play", a = "pause" },
@@ -239,7 +253,7 @@ function M.show_controls()
 		.new(
 			require("telescope.themes").get_dropdown({
 				layout_config = { width = 0.4, height = 10 },
-				prompt_title = icons.music .. " " .. current_title:gsub("%.%w+$", ""),
+				prompt_title = icons.music .. " " .. title:gsub("%.%w+$", ""),
 			}),
 			{
 				finder = finders.new_table({
@@ -311,28 +325,33 @@ end
 function M.play_file_from_config()
 	local path = read_file(config.options.music_root_file)
 	if path == "" then
-		return vim.notify("Set music library first!", "warn")
+		vim.notify("Librería no configurada.", "warn")
+		M.select_base_directory()
+		return
 	end
 
 	pickers
 		.new({}, {
 			prompt_title = "Songs (Top Level)",
-			finder = finders.new_oneshot_job({
-				"fd",
-				"-t",
-				"f",
-				"-e",
-				"mp3",
-				"-e",
-				"flac",
-				"-e",
-				"m4a",
-				"--max-depth",
-				"1",
-				"--absolute-path",
-				".",
-				path,
-			}, {}),
+			finder = finders.new_oneshot_job(
+				{
+					"fd",
+					"-t",
+					"f",
+					"-e",
+					"mp3",
+					"-e",
+					"flac",
+					"-e",
+					"m4a",
+					"--max-depth",
+					"1",
+					"--absolute-path",
+					".",
+					path,
+				},
+				{}
+			),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
@@ -362,16 +381,16 @@ end
 
 function M.show_status()
 	if not is_mpv_running() then
-		vim.notify("No hay ninguna canción activa. Selecciona una con el Picker.", "warn", {
-			title = "Music Player",
-			icon = "",
-		})
+		vim.notify(
+			"No hay ninguna canción activa. Selecciona una con el Picker.",
+			"warn",
+			{ title = "Music Player", icon = "" }
+		)
 		return
 	end
 
 	local title = get_mpv_title()
-	if not title or title == "" then
-		vim.notify("MPV is not playing", "warn", { title = "Music Player" })
+	if not title then
 		return
 	end
 
@@ -379,7 +398,7 @@ function M.show_status()
 	vim.notify(title:gsub("%.%w+$", "") .. stats, "info", {
 		title = "Now Playing",
 		icon = config.options.icons.music,
-		replace = true, -- Esto evita que se amontonen las notificaciones
+		replace = true,
 	})
 end
 
