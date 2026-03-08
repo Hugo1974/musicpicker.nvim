@@ -37,19 +37,24 @@ local function start_mpv_listener()
 	if listener_job then
 		vim.fn.jobstop(listener_job)
 	end
+
 	local socket = config.options.socket_path
+	-- Usamos /usr/bin/grep (o grep plano) para evitar alias del usuario
+	-- Quitamos stdbuf y usamos una tubería más simple
 	local cmd = string.format("socat - UNIX-CONNECT:%s", socket)
 
 	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				if line:find("metadata") or line:find("track-selection") then
+				-- Buscamos el patrón JSON que envía MPV cuando cambia de canción
+				if line:find('"property":"media%-title"') or line:find('"property":"path"') then
 					vim.defer_fn(function()
 						local title = utils.get_mpv_title()
 						if title then
-							vim.notify(title:gsub("%.%w+$", ""), "info", {
-								title = "Now Playing",
-								icon = config.options.icons.music,
+							local icon = (config.options.icons and config.options.icons.music) or "🎶"
+							vim.notify(icon .. " Now Playing: " .. title:gsub("%.%w+$", ""), "info", {
+								title = "Music Player",
+								replace = true,
 							})
 						end
 					end, 500)
@@ -73,6 +78,10 @@ function M.play_at_index(idx)
 	end
 	local track = lines[n]
 
+	-- NOTIFICACIÓN MANUAL (Esto funciona SIEMPRE, sin depender de MPV)
+	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
+	vim.notify("🎶 Playing: " .. track_name, "info", { title = "Music Player" })
+
 	update_window_title(track)
 	os.execute("killall -9 mpv 2>/dev/null")
 	utils.write_file(config.options.current_idx_file, n)
@@ -84,12 +93,6 @@ function M.play_at_index(idx)
 		n - 1
 	)
 	os.execute(cmd)
-
-	-- Notificación inmediata al usuario
-	vim.notify(vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", ""), "info", {
-		title = "Music Player",
-		icon = config.options.icons.music,
-	})
 
 	vim.defer_fn(start_mpv_listener, 800)
 end
@@ -186,25 +189,22 @@ function M.play_file_from_config()
 	pickers
 		.new({}, {
 			prompt_title = "Songs",
-			finder = finders.new_oneshot_job(
-				{
-					"fd",
-					"-t",
-					"f",
-					"-e",
-					"mp3",
-					"-e",
-					"flac",
-					"-e",
-					"m4a",
-					"--max-depth",
-					"1",
-					"--absolute-path",
-					".",
-					path,
-				},
-				{}
-			),
+			finder = finders.new_oneshot_job({
+				"fd",
+				"-t",
+				"f",
+				"-e",
+				"mp3",
+				"-e",
+				"flac",
+				"-e",
+				"m4a",
+				"--max-depth",
+				"1",
+				"--absolute-path",
+				".",
+				path,
+			}, {}),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
