@@ -1,6 +1,5 @@
 local M = {}
 local config = require("musicpicker.config")
-local utils = require("musicpicker.utils")
 
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
@@ -9,6 +8,56 @@ local finders = require("telescope.finders")
 local conf = require("telescope.config").values
 
 local listener_job = nil
+
+-- === UTILIDADES INTEGRADAS ===
+
+local function write_file(path, content)
+	local f = io.open(path, "w")
+	if f then
+		f:write(tostring(content))
+		f:close()
+	end
+end
+
+local function read_file(path)
+	local f = io.open(path, "r")
+	if not f then
+		return ""
+	end
+	local content = f:read("*all"):gsub("[%s\r\n]+", "")
+	f:close()
+	return content
+end
+
+local function get_playlist_lines()
+	local lines = {}
+	local path = config.options.m3u_file
+	if vim.fn.filereadable(path) == 1 then
+		for line in io.lines(path) do
+			local clean = line:gsub("[\r\n]+$", "")
+			if clean ~= "" and not clean:match("^#") then
+				table.insert(lines, clean)
+			end
+		end
+	end
+	return lines
+end
+
+local function get_mpv_title()
+	local cmd = string.format(
+		'echo \'{"command": ["get_property", "media-title"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
+		config.options.socket_path
+	)
+	local handle = io.popen(cmd)
+	local result = handle:read("*a")
+	handle:close()
+	if result and result ~= "" then
+		return result:match('"data"%s*:%s*"([^"]+)"')
+	end
+	return nil
+end
+
+-- === LÓGICA DEL PLUGIN ===
 
 function M.setup(opts)
 	config.setup(opts)
@@ -24,10 +73,9 @@ local function update_window_title(track_path)
 	local icon = config.options.icons.music or "🎶"
 	vim.o.title = true
 	vim.o.titlestring = icon .. " " .. name
-	-- Usamos un schedule para no bloquear el dibujado
+	io.write(string.format("\27]2;%s %s\7", icon, name))
+	io.flush()
 	vim.schedule(function()
-		io.write(string.format("\27]2;%s %s\7", icon, name))
-		io.flush()
 		vim.cmd([[redraw]])
 	end)
 end
@@ -36,18 +84,17 @@ local function start_mpv_listener()
 	if listener_job then
 		vim.fn.jobstop(listener_job)
 	end
-
 	local socket = config.options.socket_path
-	-- Importante: usamos 'stdbuf -oL' para que el flujo sea por línea y no se bloquee
-	local cmd = string.format("stdbuf -oL socat - UNIX-CONNECT:%s", socket)
+	-- Socat puro para evitar alias de grep
+	local cmd = string.format("socat - UNIX-CONNECT:%s", socket)
 
 	listener_job = vim.fn.jobstart(cmd, {
 		on_stdout = function(_, data)
 			for _, line in ipairs(data) do
-				-- Si detectamos cualquier cambio de propiedad en el JSON de MPV
-				if line:find("event") then
+				-- Detectamos el evento de cambio de archivo en el JSON de MPV
+				if line:find("metadata") or line:find("start%-file") then
 					vim.defer_fn(function()
-						local title = utils.get_mpv_title()
+						local title = get_mpv_title()
 						if title then
 							vim.notify(title:gsub("%.%w+$", ""), "info", {
 								title = "Now Playing",
@@ -55,19 +102,15 @@ local function start_mpv_listener()
 								replace = true,
 							})
 						end
-					end, 200)
+					end, 500)
 				end
 			end
-		end,
-		on_stderr = function() end,
-		on_exit = function()
-			listener_job = nil
 		end,
 	})
 end
 
 function M.play_at_index(idx)
-	local lines = utils.get_playlist_lines()
+	local lines = get_playlist_lines()
 	if #lines == 0 then
 		return
 	end
@@ -79,18 +122,14 @@ function M.play_at_index(idx)
 		n = #lines
 	end
 	local track = lines[n]
+
+	-- Notificación manual inmediata (funciona incluso si MPV tarda)
 	local track_name = vim.fn.fnamemodify(track, ":t"):gsub("%.%w+$", "")
+	vim.notify(track_name, "info", { title = "Music Player", icon = config.options.icons.music })
 
-	-- 1. NOTIFICACIÓN INMEDIATA (Sincrona)
-	vim.notify("Playing: " .. track_name, "info", { title = "Music Player" })
-
-	-- 2. TÍTULO
 	update_window_title(track)
-
-	-- 3. MATAR MPV Y REPRODUCIR
-	-- Usamos os.execute de forma limpia
 	os.execute("killall -9 mpv 2>/dev/null")
-	utils.write_file(config.options.current_idx_file, n)
+	write_file(config.options.current_idx_file, n)
 
 	local cmd = string.format(
 		"mpv --no-video --no-config --gapless-audio=yes --input-ipc-server=%s --playlist=%s --playlist-start=%d &",
@@ -100,14 +139,11 @@ function M.play_at_index(idx)
 	)
 	os.execute(cmd)
 
-	-- 4. LISTENER (Con más margen para que el socket se cree)
-	vim.defer_fn(function()
-		start_mpv_listener()
-	end, 1200)
+	vim.defer_fn(start_mpv_listener, 1000)
 end
 
 function M.show_controls()
-	local current_title = utils.get_mpv_title() or "Stopped"
+	local current_title = get_mpv_title() or "Stopped"
 	local icons = config.options.icons
 	local items = {
 		{ d = icons.play .. " Pause/Play", a = "pause" },
@@ -120,7 +156,7 @@ function M.show_controls()
 		.new(
 			require("telescope.themes").get_dropdown({
 				layout_config = { width = 0.4, height = 10 },
-				prompt_title = (icons.music .. " " .. current_title:gsub("%.%w+$", "")),
+				prompt_title = icons.music .. " " .. current_title:gsub("%.%w+$", ""),
 			}),
 			{
 				finder = finders.new_table({
@@ -180,7 +216,7 @@ function M.select_base_directory()
 				actions.close(prompt_bufnr)
 				if selection then
 					local full_path = (home .. "/" .. selection[1]):gsub("//+", "/")
-					utils.write_file(config.options.music_root_file, full_path)
+					write_file(config.options.music_root_file, full_path)
 					vim.notify("Library set to: " .. full_path)
 				end
 			end)
@@ -190,30 +226,33 @@ function M.select_base_directory()
 end
 
 function M.play_file_from_config()
-	local path = utils.read_file(config.options.music_root_file)
+	local path = read_file(config.options.music_root_file)
 	if path == "" then
-		return vim.notify("Set library first!", "warn")
+		return vim.notify("Set music library first!", "warn")
 	end
 
 	pickers
 		.new({}, {
-			prompt_title = "Songs",
-			finder = finders.new_oneshot_job({
-				"fd",
-				"-t",
-				"f",
-				"-e",
-				"mp3",
-				"-e",
-				"flac",
-				"-e",
-				"m4a",
-				"--max-depth",
-				"1",
-				"--absolute-path",
-				".",
-				path,
-			}, {}),
+			prompt_title = "Songs (Top Level)",
+			finder = finders.new_oneshot_job(
+				{
+					"fd",
+					"-t",
+					"f",
+					"-e",
+					"mp3",
+					"-e",
+					"flac",
+					"-e",
+					"m4a",
+					"--max-depth",
+					"1",
+					"--absolute-path",
+					".",
+					path,
+				},
+				{}
+			),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
