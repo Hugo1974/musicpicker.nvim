@@ -234,25 +234,22 @@ function M.play_file_from_config()
 	pickers
 		.new({}, {
 			prompt_title = "Songs (Top Level)",
-			finder = finders.new_oneshot_job(
-				{
-					"fd",
-					"-t",
-					"f",
-					"-e",
-					"mp3",
-					"-e",
-					"flac",
-					"-e",
-					"m4a",
-					"--max-depth",
-					"1",
-					"--absolute-path",
-					".",
-					path,
-				},
-				{}
-			),
+			finder = finders.new_oneshot_job({
+				"fd",
+				"-t",
+				"f",
+				"-e",
+				"mp3",
+				"-e",
+				"flac",
+				"-e",
+				"m4a",
+				"--max-depth",
+				"1",
+				"--absolute-path",
+				".",
+				path,
+			}, {}),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
