@@ -1,4 +1,4 @@
-# telescope-musicpicker.nvim
+# musicpicker.nvim
 
 A lightweight, minimal music player for Neovim powered by **Telescope** and
 **MPV**. Manage your local music library, control playback, and see what's
@@ -63,13 +63,27 @@ mp.setup(opts)
 
 -- Default Keymaps
 
-vim.keymap.set("n", "<leader>mc", mp.select_base_directory, { desc = "Music: Select Library Folder" })
+vim.keymap.set(
+      "n", "<leader>mc",
+      mp.select_base_directory,
+      { desc = "Music: Select Library Folder" })
 
-vim.keymap.set("n", "<leader>ml", mp.play_file_from_config, { desc = "Music: List Songs" })
+vim.keymap.set(
+      "n", "<leader>ml",
+      mp.play_file_from_config,
+      { desc = "Music: List Songs" })
 
-vim.keymap.set("n", "<leader>mm", mp.show_controls, { desc = "Music: Control Menu" })
+vim.keymap.set(
+      "n",
+      "<leader>mm",
+      mp.show_controls,
+      { desc = "Music: Control Menu" })
 
-vim.keymap.set('n', '<leader>ms', M.show_status, { desc = "Show music progress" })
+vim.keymap.set(
+      'n',
+      '<leader>ms',
+      mp.show_status,
+      { desc = "Show music progress" })
 end
 
 }
@@ -78,12 +92,12 @@ end
 
 ## 🚀 Usage
 
-- Select Library: Press **<leader>mc** to pick the folder where your music is stored.
+- Select Library: **<leader>mc** to pick the folder where your music is stored.
 
-- Play Music: Press **<leader>ml** to search for a song. Selecting one will generate a
+- Play Music: **<leader>ml** to search for a song. Selecting one will generate a
   playlist of all songs in that folder and start playing.
 
-- Control: Use **<leader>mm** to open the control menu. The menu title updates in
+- Control: **<leader>mm** to open the control menu. The menu title updates in
   real-time by querying the MPV socket.
 
 ## ⚙️ Configuration
