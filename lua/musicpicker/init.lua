@@ -1,3 +1,21 @@
+-- musicpicker.nvim
+-- Copyright (C) 2016  Hugo Morago Martín
+
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU General Public License as published by
+-- the Free Software Foundation, either version 3 of the License, or
+-- (at your option) any later version.
+--
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+--
+-- See GNU General Public License for more details.
+--
+-- You should have received a copy of the GNU General Public License
+--
+-- along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 local M = {}
 local config = require("musicpicker.config")
 
@@ -333,25 +351,22 @@ function M.play_file_from_config()
 	pickers
 		.new({}, {
 			prompt_title = "Songs (Top Level)",
-			finder = finders.new_oneshot_job(
-				{
-					"fd",
-					"-t",
-					"f",
-					"-e",
-					"mp3",
-					"-e",
-					"flac",
-					"-e",
-					"m4a",
-					"--max-depth",
-					"1",
-					"--absolute-path",
-					".",
-					path,
-				},
-				{}
-			),
+			finder = finders.new_oneshot_job({
+				"fd",
+				"-t",
+				"f",
+				"-e",
+				"mp3",
+				"-e",
+				"flac",
+				"-e",
+				"m4a",
+				"--max-depth",
+				"1",
+				"--absolute-path",
+				".",
+				path,
+			}, {}),
 			sorter = conf.generic_sorter({}),
 			attach_mappings = function(prompt_bufnr, _)
 				actions.select_default:replace(function()
