@@ -29,6 +29,14 @@ local function read_file(path)
 	return content
 end
 
+local function is_mpv_running()
+	-- Comprobamos si el socket existe y si el proceso mpv está activo
+	local handle = io.popen("pgrep -x mpv")
+	local result = handle:read("*a")
+	handle:close()
+	return result ~= ""
+end
+
 local function get_playlist_lines()
 	local lines = {}
 	local path = config.options.m3u_file
@@ -178,6 +186,15 @@ end
 function M.play_at_index(idx)
 	local lines = get_playlist_lines()
 	if #lines == 0 then
+		vim.notify("La lista de reproducción está vacía. Selecciona una carpeta de música primero.", "error", {
+			title = "Music Player",
+		})
+		return
+	end
+
+	if not idx or idx == "" then
+		vim.notify("No hay una última canción recordada. Elige una de la lista.", "info")
+		M.play_file_from_config()
 		return
 	end
 
@@ -344,6 +361,14 @@ function M.play_file_from_config()
 end
 
 function M.show_status()
+	if not is_mpv_running() then
+		vim.notify("No hay ninguna canción activa. Selecciona una con el Picker.", "warn", {
+			title = "Music Player",
+			icon = "",
+		})
+		return
+	end
+
 	local title = get_mpv_title()
 	if not title or title == "" then
 		vim.notify("MPV is not playing", "warn", { title = "Music Player" })
