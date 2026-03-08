@@ -82,7 +82,6 @@ end
 
 local function get_progress_stats()
 	local socket = config.options.socket_path
-	-- Enviamos los comandos separados por saltos de línea para que MPV responda claramente
 	local cmd = string.format(
 		'echo \'{"command": ["get_property", "percent-pos"]}\n{"command": ["get_property", "time-pos"]}\n{"command": ["get_property", "duration"]}\' | socat - UNIX-CONNECT:%s 2>/dev/null',
 		socket
@@ -92,13 +91,11 @@ local function get_progress_stats()
 	local result = handle:read("*a")
 	handle:close()
 
-	-- Extraemos todos los números que vengan después de '"data":'
 	local values = {}
 	for val in result:gmatch('"data"%s*:%s*(%d+%.?%d*)') do
 		table.insert(values, tonumber(val))
 	end
 
-	-- Asignamos valores (1: percent, 2: current, 3: total)
 	local percent = values[1] or 0
 	local curr_sec = values[2] or 0
 	local total_sec = values[3] or 0
@@ -108,12 +105,8 @@ local function get_progress_stats()
 		return string.format("%02d:%02d", math.floor(s / 60), math.floor(s % 60))
 	end
 
-	-- Configuración de la barra [---●---]
 	local width = 20
 	local done = math.floor((percent / 100) * width)
-	if done < 1 and percent > 0 then
-		done = 1
-	end -- Evita que el punto no salga al inicio
 
 	local bar_str = ""
 	for i = 1, width do
@@ -122,7 +115,7 @@ local function get_progress_stats()
 		elseif i < done then
 			bar_str = bar_str .. "─"
 		else
-			bar_str = bar_str .. " "
+			bar_str = bar_str .. "·" -- Carácter de relleno visible pero discreto
 		end
 	end
 
