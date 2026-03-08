@@ -63,15 +63,13 @@ mp.setup(opts)
 
 -- Default Keymaps
 
-vim.keymap.set("n", "<leader>mc", mp.select_base_directory, { desc = "Music:
-Select Library Folder" })
+vim.keymap.set("n", "<leader>mc", mp.select_base_directory, { desc = "Music: Select Library Folder" })
 
-vim.keymap.set("n", "<leader>ml", mp.play_file_from_config, { desc = "Music:
-List Songs" })
+vim.keymap.set("n", "<leader>ml", mp.play_file_from_config, { desc = "Music: List Songs" })
 
-vim.keymap.set("n", "<leader>mm", mp.show_controls, { desc = "Music: Control
-Menu" })
+vim.keymap.set("n", "<leader>mm", mp.show_controls, { desc = "Music: Control Menu" })
 
+vim.keymap.set('n', '<leader>ms', M.show_status, { desc = "Show music progress" })
 end
 
 }
