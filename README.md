@@ -92,12 +92,12 @@ end
 
 ## 🚀 Usage
 
-- Select Library: **<leader>mc** to pick the folder where your music is stored.
+- Select Library: **\<leader\>mc** to pick the folder where your music is stored.
 
-- Play Music: **<leader>ml** to search for a song. Selecting one will generate a
+- Play Music: **\<leader\>ml** to search for a song. Selecting one will generate a
   playlist of all songs in that folder and start playing.
 
-- Control: **<leader>mm** to open the control menu. The menu title updates in
+- Control: **\<leader\>mm** to open the control menu. The menu title updates in
   real-time by querying the MPV socket.
 
 ## ⚙️ Configuration
