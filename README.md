@@ -100,6 +100,9 @@ end
 - Control: **\<leader\>mm** to open the control menu. The menu title updates in
   real-time by querying the MPV socket.
 
+- Status: **\<leader\>ms** Show progress status of song
+  real-time by querying the MPV socket.
+
 ## ⚙️ Configuration
 
 Config file: **musicpicker.nvim/lua/musicpicker/config.lua**
